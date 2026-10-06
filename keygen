@@ -1,0 +1,149 @@
+#!/bin/bash
+
+set -euo pipefail
+
+# ============================================================
+# Настройки
+# ============================================================
+
+# SSH-алиас, который будет использоваться в git URL:
+# git@HOST_NAME:group/project.git
+HOST_NAME="gitlab3"
+
+# Реальный адрес GitLab
+HOST_ADDRESS="gitlab.com"
+
+# Имя SSH-ключа
+KEY_NAME="gitlab_deploy"
+
+# SSH-пользователь
+SSH_USER="git"
+
+# ============================================================
+# Автоматические параметры
+# ============================================================
+
+USER_NAME="$(whoami)"
+LOCAL_HOST_NAME="$(hostname -f 2>/dev/null || hostname)"
+
+SSH_DIR="$HOME/.ssh"
+KEY_PATH="$SSH_DIR/$KEY_NAME"
+SSH_CONFIG="$SSH_DIR/config"
+
+COMMENT="${USER_NAME}@${LOCAL_HOST_NAME}"
+
+# ============================================================
+# Подготовка ~/.ssh
+# ============================================================
+
+mkdir -p "$SSH_DIR"
+chmod 700 "$SSH_DIR"
+
+# ============================================================
+# Проверка существующего ключа
+# ============================================================
+
+if [[ -f "$KEY_PATH" ]]; then
+    echo "Ключ уже существует: $KEY_PATH"
+    read -r -p "Перезаписать ключ? [y/N]: " answer
+
+    case "$answer" in
+        [yY]|[yY][eE][sS])
+            echo "Перезаписываю ключ..."
+            rm -f "$KEY_PATH" "${KEY_PATH}.pub"
+            ;;
+        *)
+            echo "Операция отменена."
+            exit 0
+            ;;
+    esac
+fi
+
+# ============================================================
+# Генерация ключа
+# ============================================================
+
+echo
+echo "Создаю GitLab Deploy Key:"
+echo "  User:       $USER_NAME"
+echo "  Host:       $LOCAL_HOST_NAME"
+echo "  SSH alias:  $HOST_NAME"
+echo "  GitLab:     $HOST_ADDRESS"
+echo "  Key name:   $KEY_NAME"
+echo "  Key path:   $KEY_PATH"
+echo
+
+ssh-keygen \
+    -t ed25519 \
+    -C "$COMMENT" \
+    -f "$KEY_PATH" \
+    -N ""
+
+# ============================================================
+# Права на ключи
+# ============================================================
+
+chmod 600 "$KEY_PATH"
+chmod 644 "${KEY_PATH}.pub"
+
+# ============================================================
+# Настройка ~/.ssh/config
+# ============================================================
+
+mkdir -p "$SSH_DIR"
+chmod 700 "$SSH_DIR"
+
+echo
+echo "Настраиваю SSH config..."
+
+if [[ -f "$SSH_CONFIG" ]]; then
+    echo "Использую существующий SSH config: $SSH_CONFIG"
+else
+    echo "SSH config не найден. Создаю: $SSH_CONFIG"
+    touch "$SSH_CONFIG"
+fi
+
+chmod 600 "$SSH_CONFIG"
+
+# Добавляем конфигурацию строго в конец файла
+{
+    echo "Host $HOST_NAME"
+    echo "  HostName $HOST_ADDRESS"
+    echo "  User $SSH_USER"
+    echo "  IdentitiesOnly yes"
+    echo "  IdentityFile $KEY_PATH"
+    echo "  PreferredAuthentications publickey"
+    echo "  StrictHostKeyChecking accept-new"
+    echo "  ServerAliveInterval 60"
+    echo "  ServerAliveCountMax 3"
+} >> "$SSH_CONFIG"
+
+# ============================================================
+# Результат
+# ============================================================
+
+echo
+echo "============================================================"
+echo "GitLab Deploy Key готов."
+echo "============================================================"
+echo
+echo "Публичный ключ для добавления в GitLab:"
+echo
+cat "${KEY_PATH}.pub"
+echo
+
+echo "SSH alias:"
+echo "  $HOST_NAME"
+
+echo
+echo "Проверка SSH-конфигурации:"
+echo "  ssh -G $HOST_NAME"
+
+echo
+echo "Проверка подключения к GitLab:"
+echo "  ssh -T $HOST_NAME"
+
+echo
+echo "Git URL:"
+echo "  git@$HOST_NAME:GROUP/PROJECT.git"
+echo
